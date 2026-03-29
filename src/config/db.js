@@ -4,6 +4,9 @@
  */
 
 const mongoose = require('mongoose');
+const dns = require('dns');
+dns.setServers(['8.8.8.8', '1.1.1.1']);
+dns.setDefaultResultOrder('ipv4first');
 
 /**
  * Establishes a connection to the MongoDB cluster.
