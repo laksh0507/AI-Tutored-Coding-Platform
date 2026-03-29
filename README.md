@@ -6,6 +6,26 @@ A high-performance backend for a competitive programming platform that redefines
 
 ---
 
+## 🏗️ Project Architecture
+
+```mermaid
+graph TD
+    Client[Client / Frontend] --> API[Express API Gateway]
+    API --> Auth[JWT & Auth Middleware]
+    API --> RateLimit[Redis Rate Limiter]
+    
+    Auth --> Controllers[Business Logic Controllers]
+    RateLimit --> Controllers
+    
+    Controllers --> Gemini[Google Gemini AI Engine]
+    Controllers --> MongoDB[(MongoDB Problem Store)]
+    Controllers --> RedisCache[(Redis Session/Limit Store)]
+    
+    Gemini -.-> Hints[4-Level AI Hints]
+```
+
+---
+
 ## 🔥 Unique Value Proposition: The AI Tutor
 
 Unlike traditional platforms like LeetCode that provide static, one-size-fits-all hints, this platform features a **4-Level AI-Powered Hint System** integrated with **Google Gemini AI**. 
@@ -39,6 +59,16 @@ Our choice of technologies was driven by the need for **low latency**, **scalabi
 | **MongoDB (Mongoose)** | Provides the flexible schema required to handle diverse coding problems and complex submission histories. |
 | **Redis** | Essential for ultra-fast, in-memory rate limiting and caching, ensuring the security layer doesn't bottleneck performance. |
 | **Google Gemini AI** | Leveraged for its superior reasoning and pedagogical capabilities in tutoring complex technical concepts. |
+
+---
+
+## 🔬 Architectural Deep Dive
+
+### Why the "Service-Controller" Pattern?
+The project follows a modular architecture where the **Controllers** handle the request/response cycle, while the **Business Logic** (like AI hint generation) is isolated. This ensures that the platform remains **maintainable** and **testable** as we add more complex features.
+
+### The Security Layer: Redis vs. Standard Middlewares
+While standard Express rate-limiters work for simple apps, we chose **Redis** for its **distributed nature**. This ensures that even if we scale to multiple instances, the rate limits for expensive AI calls remain consistent and synchronized across the entire cluster.
 
 ---
 
