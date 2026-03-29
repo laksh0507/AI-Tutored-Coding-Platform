@@ -1,6 +1,15 @@
+/**
+ * @file redis.js
+ * @description Redis client configuration.
+ * Used for token blocklisting (logout) and rate limiting.
+ */
+
 const { createClient } = require('redis');
 
-const redisclient = createClient({
+/**
+ * Initializes the Redis client with custom reconnect strategies and error handling.
+ */
+const redisClient = createClient({
     username: 'default',
     password: process.env.REDIS_PASS,
     socket: {
@@ -17,13 +26,13 @@ const redisclient = createClient({
     }
 });
 
-// Prevent unhandled 'error' event from crashing the server
-redisclient.on('error', (err) => {
+// Event listener to prevent unhandled 'error' event from crashing the server
+redisClient.on('error', (err) => {
     console.warn("⚠️  Redis error:", err.message);
 });
 
-redisclient.on('reconnecting', () => {
+redisClient.on('reconnecting', () => {
     console.log("🔄 Redis: reconnecting...");
 });
 
-module.exports = redisclient;
+module.exports = redisClient;

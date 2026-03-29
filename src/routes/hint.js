@@ -1,11 +1,17 @@
+/**
+ * @file hint.js
+ * @description API Routes for the Hint System.
+ */
+
 const express = require('express');
-const hintrouter = express.Router();
-const usermiddleware = require('../middleware/usermiddleware');
-const ratelimit = require('../middleware/ratelimit');
+const hintRouter = express.Router();
+const userMiddleware = require('../middleware/usermiddleware');
+const rateLimitMiddleware = require('../middleware/ratelimit');
 const { gethint, aihint, getfullsolution } = require('../controllers/userhint');
 
-hintrouter.get('/:id', usermiddleware, ratelimit, gethint);
-hintrouter.post('/ai/:id', usermiddleware, ratelimit, aihint);
-hintrouter.get('/solution/:id', usermiddleware, ratelimit, getfullsolution);
+// All hint routes are protected by authentication and rate limiting
+hintRouter.get('/:id', userMiddleware, rateLimitMiddleware, gethint);
+hintRouter.post('/ai/:id', userMiddleware, rateLimitMiddleware, aihint);
+hintRouter.get('/solution/:id', userMiddleware, rateLimitMiddleware, getfullsolution);
 
-module.exports = hintrouter;
+module.exports = hintRouter;

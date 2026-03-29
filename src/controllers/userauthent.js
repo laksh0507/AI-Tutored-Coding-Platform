@@ -1,41 +1,60 @@
-const redisclient = require("../config/redis");
+/**
+ * @file userauthent.js
+ * @description Controllers for User Authentication and Account Management.
+ * Handles registration, login, logout, and profile lifecycle (deactivation/deletion).
+ */
+
+const redisClient = require("../config/redis");
 const User = require("../models/user");
-const validate = require('../utils/validator');
+const validateRequest = require('../utils/validator');
 const bcrypt = require("bcrypt");
 const jwt = require('jsonwebtoken');
-const submission = require("../models/submission");
+const Submission = require("../models/submission");
+
+/**
+ * Registers a new user.
+ * @route POST /user/register
+ */
 const register = async (req, res) => {
     try {
-        //validate the data;
-        validate(req.body);
-        const { firstname, emailId, password } = req.body;
+        validateRequest(req.body);
+        const { emailId, password } = req.body;
+        
+        // Hash password before saving
         req.body.password = await bcrypt.hash(password, 10);
-        req.body.role = "user"
+        req.body.role = "user";
 
         const user = await User.create(req.body);
-        const token = jwt.sign({ _id: user._id, emailId: emailId, role: "user" }, process.env.JWT_KEY, { expiresIn: 60 * 60 });
-        res.cookie('token', token, { maxAge: 60 * 60 * 1000 });
-        res.status(201).send("User registered sucessfully");
+        
+        // Generate initial session token
+        const token = jwt.sign(
+            { _id: user._id, emailId: emailId, role: "user" }, 
+            process.env.JWT_KEY, 
+            { expiresIn: '1h' }
+        );
+        
+        res.cookie('token', token, { maxAge: 3600000, httpOnly: true });
+        res.status(201).send("User registered successfully");
     }
     catch (err) {
         res.status(400).send(err.message);
-
     }
 }
 
+/**
+ * authenticates a user and starts a session.
+ * @route POST /user/login
+ */
 const login = async (req, res) => {
     try {
         const { emailId, password } = req.body;
-        if (!emailId)
-            throw new Error("Invalid Credentials");
-        if (!password)
-            throw new Error("Invalid Credentials");
-        const user = await User.findOne({ emailId });
+        if (!emailId || !password) throw new Error("Invalid Credentials");
 
-        const ans = await bcrypt.compare(password, user.password);
-        if (!ans) {
-            throw new Error("Invalid credentials");
-        }
+        const user = await User.findOne({ emailId });
+        if (!user) throw new Error("Invalid credentials");
+
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) throw new Error("Invalid credentials");
 
         if (!user.isActive) {
             return res.status(403).json({
@@ -44,131 +63,128 @@ const login = async (req, res) => {
             });
         }
 
-        const token = jwt.sign({ _id: user._id, emailId: emailId, role: user.role }, process.env.JWT_KEY, { expiresIn: 60 * 60 });
-        res.cookie('token', token, { maxAge: 60 * 60 * 1000 });
-        res.status(200).send("logged in sucessfully");
+        const token = jwt.sign(
+            { _id: user._id, emailId: emailId, role: user.role }, 
+            process.env.JWT_KEY, 
+            { expiresIn: '1h' }
+        );
+        
+        res.cookie('token', token, { maxAge: 3600000, httpOnly: true });
+        res.status(200).send("logged in successfully");
     }
     catch (err) {
-        res.status(401).send("Error:" + err);
-    }
-}
-
-const logout = async (req, res) => {
-    try {
-        //validate the token
-        //add token to the redis block-list
-        const { token } = req.cookies;
-        const payload = jwt.decode(token);
-        await redisclient.set(`token:${token}`, "blocked");
-        await redisclient.expireAt(`token:${token}`, payload.exp);
-
-        res.cookie("token", null, { expires: new Date(Date.now()) });
-        res.send("logged out sucessfully");
-    }
-    catch (err) {
-        res.status(503).send("Error:" + err.message);
+        res.status(401).send("Error: " + err.message);
     }
 }
 
 /**
- * Admin Registration
- * 
- * How it works in real-world production systems:
- * 1. The FIRST admin is always created manually (database seeding or direct DB insert).
- * 2. After that, existing admins can create new admins via this protected API.
- * 3. This API is NEVER exposed on the public website — it is only accessible
- *    through a separate internal admin dashboard (e.g., admin.leetcode.com),
- *    which is typically restricted to the company's VPN/internal network.
- * 4. No token/cookie is returned here because the admin is creating an account
- *    for someone else — only the new user's credentials are shared securely.
- * 
- * Role hierarchy: SuperAdmin → Admin → User
- * Public users can never access this route (protected by adminmiddleware).
+ * Ends a user session and invalidates the token in Redis.
+ * @route POST /user/logout
+ */
+const logout = async (req, res) => {
+    try {
+        const { token } = req.cookies;
+        const payload = jwt.decode(token);
+        
+        // Add token to Redis block-list until it expires
+        await redisClient.set(`token:${token}`, "blocked");
+        await redisClient.expireAt(`token:${token}`, payload.exp);
+
+        res.cookie("token", null, { expires: new Date(0) });
+        res.send("logged out successfully");
+    }
+    catch (err) {
+        res.status(503).send("Error: " + err.message);
+    }
+}
+
+/**
+ * Admin-only route to register a new admin user.
+ * Restricted by adminmiddleware.
  */
 const adminregister = async (req, res) => {
     try {
-        //validate the data;
-        validate(req.body);
-        const { firstname, emailId, password } = req.body;
+        validateRequest(req.body);
+        const { emailId, password } = req.body;
         req.body.password = await bcrypt.hash(password, 10);
         req.body.role = "admin";
 
-        const user = await User.create(req.body);
-
-        res.status(201).send("Admin user created successfully. Credentials can now be shared securely.");
+        await User.create(req.body);
+        res.status(201).send("Admin user created successfully.");
     }
     catch (err) {
-        res.status(400).send("Error:" + err);
-
+        res.status(400).send("Error: " + err.message);
     }
 }
 
+/**
+ * Permanently deletes a user profile and all associated data.
+ * @route DELETE /user/profile
+ */
 const deleteprofile = async (req, res) => {
     try {
         const userid = req.result._id;
-        //deleted from userschema
+        
         await User.findByIdAndDelete(userid);
-        //delelted from submission schema 
-        await submission.deleteMany({ userid });
+        await Submission.deleteMany({ userid });
 
-        //blocklist the token in redis and clear the cookie (auto-logout)
+        // Invalidate current session
         const { token } = req.cookies;
         const payload = jwt.decode(token);
-        await redisclient.set(`token:${token}`, "blocked");
-        await redisclient.expireAt(`token:${token}`, payload.exp);
-        res.cookie("token", null, { expires: new Date(Date.now()) });
-
-        res.status(200).send("deleted sucessfully");
+        await redisClient.set(`token:${token}`, "blocked");
+        await redisClient.expireAt(`token:${token}`, payload.exp);
+        
+        res.cookie("token", null, { expires: new Date(0) });
+        res.status(200).send("deleted successfully");
     }
     catch (err) {
         res.status(500).send("internal server error");
     }
 }
 
+/**
+ * Soft-deactivates a user profile.
+ * @route PATCH /user/deactivate
+ */
 const deactivateprofile = async (req, res) => {
     try {
         await User.findByIdAndUpdate(req.result._id, { isActive: false });
-        res.cookie("token", null, { expires: new Date(Date.now()) });
-        res.status(200).send("deactivated sucessfully");
+        res.cookie("token", null, { expires: new Date(0) });
+        res.status(200).send("deactivated successfully");
     }
     catch (err) {
         res.status(500).send("internal server error");
     }
 }
 
+/**
+ * Reactivates a deactivated account upon successful login.
+ * @route POST /user/activate
+ */
 const activateprofile = async (req, res) => {
     try {
         const { emailId, password } = req.body;
 
-        // 1. Find the user
         const user = await User.findOne({ emailId });
-        if (!user) {
-            throw new Error("Invalid Credentials");
-        }
+        if (!user) throw new Error("Invalid Credentials");
 
-        // 2. Check password
         const isPasswordCorrect = await bcrypt.compare(password, user.password);
-        if (!isPasswordCorrect) {
-            throw new Error("Invalid Credentials");
-        }
+        if (!isPasswordCorrect) throw new Error("Invalid Credentials");
 
-        // 3. Reactivate!
         user.isActive = true;
         await user.save();
 
-        // 4. Log them in immediately (issue token)
         const token = jwt.sign(
             { _id: user._id, emailId: user.emailId, role: user.role },
             process.env.JWT_KEY,
-            { expiresIn: 60 * 60 }
+            { expiresIn: '1h' }
         );
-        res.cookie('token', token, { maxAge: 60 * 60 * 1000 });
+        res.cookie('token', token, { maxAge: 3600000, httpOnly: true });
 
         res.status(200).send("Account reactivated and logged in successfully");
     } catch (err) {
         res.status(401).send("Error: " + err.message);
     }
 };
-
 
 module.exports = { register, login, logout, adminregister, deleteprofile, deactivateprofile, activateprofile };
